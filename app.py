@@ -137,7 +137,7 @@ async def on_message(message):
     if random_chance < 0.05:
 
         #Pog reaction
-        emoji = discord.utils.get(discord.guild.emojis, name='poggers')
+        emoji = discord.utils.get(guild.emojis, name='poggers')
         await message.add_reaction(emoji)
 
         author = message.author.name
