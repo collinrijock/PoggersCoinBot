@@ -1,7 +1,10 @@
 import os
 import json
+import random
+import time
 import discord
 from discord.ext import commands
+
 
 bot = commands.Bot(command_prefix='=')
 
@@ -25,7 +28,7 @@ async def get_json(filename):
 async def bet_coins(author, coins, for_win):
     data = await get_json(coin_filename)
     if not author in data:
-        await deposit_coins(author, 5000)
+        await deposit_coins(author, 10)
     await add_player_to_event(author, for_win, coins)
     new_coins = data[author]['coins'] - coins
     data[author]['coins'] = new_coins
@@ -42,7 +45,8 @@ async def deposit_coins(author, coins):
     data = await get_json(coin_filename)
     data[author] = {
             'coins': coins,
-            'misc': None
+            'daily_pog': True,
+            'daily_antipog': True
             }
     await write_json(data, coin_filename)
 
@@ -114,7 +118,7 @@ async def bet(ctx, arg, arg2):
         await ctx.send("ERROR!: There are no ongoing events")
         return
     try:
-        author = ctx.message.author.nick
+        author = ctx.message.author.name # I fixed ur shit bitch
         coins = int(arg)
         for_win = True if arg2 == 'win' else False
         assert 0 < coins <= 50000
@@ -123,6 +127,53 @@ async def bet(ctx, arg, arg2):
     except Exception as e:
         print(e)
         return
+
+
+#On message, 1/20 chance of gaining 1 pog
+
+@bot.event
+async def on_message(message):
+    random_chance = random.random()
+    if random_chance < 0.05:
+
+        #Pog reaction
+        emoji = discord.utils.get(discord.guild.emojis, name='poggers')
+        await message.add_reaction(emoji)
+
+        author = message.author.name
+        pog_gained = 1
+        data = await get_json(coin_filename)
+
+        if not author in data:
+            await deposit_coins(author, 10)
+
+        new_coins = data[author]['coins'] + pog_gained
+        data[author]['coins'] = new_coins
+
+        await write_json(data, coin_filename)
+        return new_coins
+
+
+# Pog ( Plus PoggersCoin to someone )
+
+# @bot.command()
+# async def pog(ctx, user_pogged):
+
+#     data = await get_json(coin_filename)
+#     author = ctx.message.author.name
+
+#     #check users exist
+#     if not author in data:
+#         await deposit_coins(author, 10)
+#     if not user_pogged in data:
+#         await deposit_coins(user_pogged, 10)
+
+#     #if daily pog is available
+#     if data[author][daily_pog]:
+
+
+
+        
 
 token = os.environ['DISCORD_BOT_TOKEN']
 bot.run(token)
