@@ -4,6 +4,7 @@ import random
 import time
 import discord
 from discord.ext import commands
+from discord.utils import get
 
 
 bot = commands.Bot(command_prefix='=')
@@ -27,11 +28,11 @@ async def get_json(filename):
 
 async def bet_coins(author, coins, for_win):
     data = await get_json(coin_filename)
-    if not author in data:
+    if not author.id in data:
         await deposit_coins(author, 10)
     await add_player_to_event(author, for_win, coins)
-    new_coins = data[author]['coins'] - coins
-    data[author]['coins'] = new_coins
+    new_coins = data[author.id]['coins'] - coins
+    data[author.id]['coins'] = new_coins
     await write_json(data, coin_filename)
     return new_coins
 
@@ -41,9 +42,9 @@ async def add_player_to_event(name, for_win, coins):
     event['players'].append(data)
     await write_json(event, event_filename)
 
-async def deposit_coins(author, coins):
+async def deposit_coins(author_id, coins):
     data = await get_json(coin_filename)
-    data[author] = {
+    data[author_id] = {
             'coins': coins,
             'daily_pog': True,
             'daily_antipog': True
@@ -86,7 +87,7 @@ async def is_event_finished():
 @bot.command()
 async def start(ctx, odds):
     try:
-        author = ctx.message.author.name
+        author = ctx.message.author
         await start_event(odds, author)
         await ctx.send("Event created and is active")
     except Exception as e:
@@ -96,7 +97,7 @@ async def start(ctx, odds):
 @bot.command()
 async def end(ctx, win):
     try:
-        author = ctx.message.author.name
+        author = ctx.message.author
         try:
             win = True if win.lower() == 'win' else False
         except:
@@ -118,16 +119,32 @@ async def bet(ctx, arg, arg2):
         await ctx.send("ERROR!: There are no ongoing events")
         return
     try:
-        author = ctx.message.author.name # I fixed ur shit bitch
+        author = ctx.message.author
         coins = int(arg)
         for_win = True if arg2 == 'win' else False
         assert 0 < coins <= 50000
         balance = await bet_coins(author, coins, for_win)
-        await ctx.send(F"{author} bet {coins} coins. New balance for account is: {balance}")
+        await ctx.send(F"{author.name} bet {coins} coins. New balance for account is: {balance}")
     except Exception as e:
         print(e)
         return
 
+@bot.command()
+async def bal(ctx):
+    data = await get_json(coin_filename)
+    author = ctx.message.author
+    if not str(author.id) in data:
+        await deposit_coins(author.id, 10)
+        data = await get_json(coin_filename)
+
+    guild = ctx.message.guild
+    emoji = get(guild.emojis, name='poggers')
+    balance = data[str(author.id)]['coins']
+    if author.nick:
+        await ctx.message.channel.send(f"{author.nick} has {balance} {emoji}")
+    else:
+        await ctx.message.channel.send(f"{author.name} has {balance} {emoji}")
+    return
 
 #On message, 1/20 chance of gaining 1 pog
 
@@ -136,44 +153,68 @@ async def on_message(message):
     random_chance = random.random()
     if random_chance < 0.05:
 
-        #Pog reaction
-        emoji = discord.utils.get(guild.emojis, name='poggers')
+        if message.author.bot:
+            return
+
+        #Pog emote reaction
+        guild = message.guild
+        emoji = get(guild.emojis, name='poggers')
         await message.add_reaction(emoji)
 
-        author = message.author.name
+        author = message.author
+        author_id = str(message.author.id)
         pog_gained = 1
         data = await get_json(coin_filename)
 
-        if not author in data:
-            await deposit_coins(author, 10)
+        if not author_id in data:
+            await deposit_coins(author_id, 10)
+            data = await get_json(coin_filename)
 
-        new_coins = data[author]['coins'] + pog_gained
-        data[author]['coins'] = new_coins
-
+        new_coins = data[author_id]['coins'] + pog_gained
+        data[author_id]['coins'] = new_coins
         await write_json(data, coin_filename)
-        return new_coins
 
+        if author.nick:
+            await message.channel.send(f"{author.nick} now has {new_coins} {emoji}")
+        else:
+            await message.channel.send(f"{author.name} now has {new_coins} {emoji}")
+
+
+        await bot.process_commands(message)
+    else:
+        await bot.process_commands(message)
 
 # Pog ( Plus PoggersCoin to someone )
+@bot.command()
+async def pog(ctx, user_pogged,amount='1'):
 
-# @bot.command()
-# async def pog(ctx, user_pogged):
+     amount = int(amount)
+     if amount < 1:
+         return
+     data = await get_json(coin_filename)
+     author = ctx.message.author
+     author_id = str(author.id)
 
-#     data = await get_json(coin_filename)
-#     author = ctx.message.author.name
+     # validate target
+     if ctx.message.guild.get_member(user_pogged):
+         target_user_id = ctx.message.server.get_member(user_pogged).id
+     else:
+         return
 
-#     #check users exist
-#     if not author in data:
-#         await deposit_coins(author, 10)
-#     if not user_pogged in data:
-#         await deposit_coins(user_pogged, 10)
+     # check users exist
+     if not author in data:
+         await deposit_coins(author_id, 10)
+     if not target_user_id in data:
+         await deposit_coins(target_user_id, 10)
 
-#     #if daily pog is available
-#     if data[author][daily_pog]:
-
-
-
-        
+     # make transaction
+     user_balance = data[author_id]['coins']
+     target_balance = data[target_user_id]['coins']
+     if user_balance > amount:
+         user_balance -= amount
+         target_balance += amount
+         data[author_id]['coins'] = user_balance
+         data[target_user_id]['coins'] = user_balance
 
 token = os.environ['DISCORD_BOT_TOKEN']
 bot.run(token)
