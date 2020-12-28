@@ -1,7 +1,10 @@
+#!/usr/bin/python3.8
 import os
 import json
 import random
+import csv
 import time
+import typing
 import discord
 from discord.ext import commands
 from discord.utils import get
@@ -9,15 +12,103 @@ from discord.utils import get
 
 bot = commands.Bot(command_prefix='=')
 
+class PhraseGenerator:
+    def __init__(self, filename):
+        verbs = []
+        nouns = []
+        subjects = []
+        words_list = [verbs, nouns, subjects]
+        with open(filename, 'r') as f:
+            reader = csv.reader(f)
+            next(reader, None)
+            for row in reader:
+                for i in range(3):
+                    if (word := row[i]):
+                        words_list[i].append(word)
+        self.verbs = verbs
+        self.nouns = nouns
+        self.subjects = subjects
+
+    def _get_verb(self) -> str:
+        return random.choice(self.verbs)
+
+    def _get_noun(self) -> str:
+        return random.choice(self.nouns)
+
+    def _get_subject(self) -> str:
+        return random.choice(self.subjects)
+
+    def generate(self) -> str:
+        calls = [self.generate_original, self.generate_alt, self.generate_war]
+        method = random.choice(calls)
+        return method()
+
+    def generate_original(self) -> str:
+        verb = self._get_verb()
+        noun = self._get_noun()
+        subject = self._get_subject()
+        return f"I will {verb} {subject}'s {noun}"
+
+    def generate_alt(self) -> str:
+        verb = self._get_verb()
+        noun = self._get_noun()
+        subject = self._get_subject()
+        return f"hey {subject} i can't wait to {verb} your {noun}"
+
+    def generate_war(self) -> str:
+        verb = self._get_verb()
+        noun = self._get_noun()
+        subject = self._get_subject()
+        war = self._get_war_name()
+        return f"hey {subject} did you know that they used to {verb} {noun} during the {war}"
+
+    def _get_war_name(self) -> str:
+        wars = ["Boxer Rebellion",
+        "Boer War",
+        "Russo-Japanese War",
+        "Mexican Revolution",
+        "First and Second Balkan Wars",
+        "World War I",
+        "Armenian Genocide",
+        "Russian Revolution",
+        "Russian Civil War",
+        "Irish War of Independence",
+        "Holocaust",
+        "Second Italo-Abyssinian War",
+        "Spanish Civil War",
+        "World War II",
+        "Cold War",
+        "Chinese Civil War",
+        "First Indochina War",
+        "Israel War of Independence",
+        "Korean War",
+        "French-Algerian War",
+        "First Sudanese Civil War",
+        "Suez Crisis",
+        "Cuban Revolution",
+        "Vietnam War",
+        "Six-Day War",
+        "Soviet-Afghan War",
+        "Iran-Iraq War",
+        "Persian Gulf War",
+        "Third Balkan War",
+        "Rwandan Genocide",
+        ]
+        return random.choice(wars)
+
+
+
 # make the filestorage
 coin_filename = 'out_file.json'
 event_filename = 'event_file.json'
+blacklist_filename = "blacklist.txt"
+black_list = None
 
 @bot.event
 async def on_ready():
     print("bot online")
 
-async def write_json(data, filename):
+async def write_json(data, filename=coin_filename):
     with open(filename, 'w') as f:
         json.dump(data, f)
 
@@ -33,7 +124,7 @@ async def bet_coins(author, coins, for_win):
     await add_player_to_event(author, for_win, coins)
     new_coins = data[author.id]['coins'] - coins
     data[author.id]['coins'] = new_coins
-    await write_json(data, coin_filename)
+    await write_json(data, filename=coin_filename)
     return new_coins
 
 async def add_player_to_event(name, for_win, coins):
@@ -49,7 +140,7 @@ async def deposit_coins(author_id, coins):
             'daily_pog': True,
             'daily_antipog': True
             }
-    await write_json(data, coin_filename)
+    await write_json(data, filename=coin_filename)
 
 async def start_event(odds, author):
     event = {'odds': odds, 'author': author, 'players': [], 'done': False}
@@ -133,6 +224,10 @@ async def bet(ctx, arg, arg2):
 async def bal(ctx):
     data = await get_json(coin_filename)
     author = ctx.message.author
+    if ctx.message.mentions:
+        author = ctx.message.mentions[0]
+        print(ctx.message.mentions[0].id)
+
     if not str(author.id) in data:
         await deposit_coins(author.id, 10)
         data = await get_json(coin_filename)
@@ -148,10 +243,68 @@ async def bal(ctx):
 
 #On message, 1/20 chance of gaining 1 pog
 
+async def check_author_meets_coin_cutoff(author, cutoff):
+    """
+    Returns true if author has enough balance
+    to meet the cutoff, else false
+    """
+    balance = await get_author_balance(author)
+    return balance >= cutoff
+
+async def get_author_balance(author):
+    data = await get_json(coin_filename)
+    balance = data[str(author.id)]['coins']
+    return balance
+
+@bot.command()
+async def blacklist(ctx, blacklist_token):
+    author = ctx.message.author
+    cutoff = 1
+    if not await check_author_meets_coin_cutoff(author, cutoff):
+        balance = await get_author_balance(author)
+        await ctx.message.channel.send(f"@{author.nick} not enough balance. (Needs {cutoff} has {balance})")
+    else:
+        await add_token_to_song_blacklist(blacklist_token)
+        await subtract_from_balance(author, 1)
+        balance = await get_author_balance(author)
+        await ctx.message.channel.send(f"added {blacklist_token} to blacklist. new balance for {author.nick} is: {balance}")
+
+async def add_token_to_song_blacklist(blacklist_token):
+    global black_list
+    black_list = None
+    with open(blacklist_filename, 'w') as f:
+        f.write(blacklist_token + "\n")
+
+async def subtract_from_balance(author, amount):
+    data = await get_json(coin_filename)
+    new_balance = max(data[str(author.id)]['coins'] - amount, 0)
+    data[str(author.id)]['coins'] = new_balance
+    write_json(data)
+
+async def message_is_blacklisted(message):
+    if not message.embeds:
+        return
+    message_content = message.embeds[0].to_dict()["description"].lower()
+    global black_list
+    if not black_list:
+        with open(blacklist_filename, 'r') as f:
+            black_list = f.readlines()
+    for word in black_list:
+        trim_word = word.replace("\n", "")
+        if trim_word.lower() in message_content:
+            return True
+    return False
+
+
 @bot.event
 async def on_message(message):
-    random_chance = random.random()
-    if random_chance < 0.05:
+    if message.author.bot and await message_is_blacklisted(message):
+        time.sleep(0.5)
+        await message.channel.send("-skip")
+        return
+
+    random_chance = random.random() < (1 / 500)
+    if random_chance:
 
         if message.author.bot:
             return
@@ -172,7 +325,7 @@ async def on_message(message):
 
         new_coins = data[author_id]['coins'] + pog_gained
         data[author_id]['coins'] = new_coins
-        await write_json(data, coin_filename)
+        await write_json(data, filename=coin_filename)
 
         if author.nick:
             await message.channel.send(f"{author.nick} now has {new_coins} {emoji}")
@@ -184,9 +337,24 @@ async def on_message(message):
     else:
         await bot.process_commands(message)
 
+csv_filename = "sheet.csv"
+israel_generator = PhraseGenerator(csv_filename)
+
+@bot.command()
+async def israel_says(ctx):
+    await ctx.message.channel.send(israel_generator.generate_original())
+
+@bot.command()
+async def israel_rand(ctx):
+    await ctx.message.channel.send(israel_generator.generate())
+
+@bot.command()
+async def israel_war(ctx):
+    await ctx.message.channel.send(israel_generator.generate_war())
+
 # Pog ( Plus PoggersCoin to someone )
 @bot.command()
-async def pog(ctx, user_pogged,amount='1'):
+async def pog(ctx, user_pogged,amount:typing.Optional[int]=1):
 
      amount = int(amount)
      if amount < 1:
@@ -194,13 +362,7 @@ async def pog(ctx, user_pogged,amount='1'):
      data = await get_json(coin_filename)
      author = ctx.message.author
      author_id = str(author.id)
-
-     # validate target
-     if ctx.message.guild.get_member(user_pogged):
-         target_user_id = ctx.message.server.get_member(user_pogged).id
-     else:
-         return
-
+     user_pogged_id = ctx.message.mentions[0]
      # check users exist
      if not author in data:
          await deposit_coins(author_id, 10)
